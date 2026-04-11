@@ -2,6 +2,11 @@
 
 > 原版 ALTRun（Delphi 2007）的现代化重写版，基于 **Rust + Tauri + React + TypeScript** 构建，支持 Windows、macOS、Linux。
 
+所有代码由[KroWork](https://krow.kuaishou.com/)调用Kro Max模型生成。
+
+<img width="184" height="152" alt="image" src="https://github.com/user-attachments/assets/ae0fdfac-42e1-4010-8ad5-93491863a745" />
+<img width="184" height="152" alt="image" src="https://github.com/user-attachments/assets/99d44e6f-2ada-4c7b-9a0e-ffc76132b95d" />
+
 ---
 
 ## 致谢
