@@ -4,6 +4,9 @@
 
 所有代码由[KroWork](https://krow.kuaishou.com/)调用Kro Max模型生成。
 
+ <img width="184" height="152" alt="image" src="https://github.com/user-attachments/assets/ae0fdfac-42e1-4010-8ad5-93491863a745" />
+<img width="184" height="152" alt="image" src="https://github.com/user-attachments/assets/99d44e6f-2ada-4c7b-9a0e-ffc76132b95d" />
+
 ---
 
 ## 致谢
@@ -25,7 +28,6 @@
 - 使用 **React + TypeScript** 构建前端 UI，支持深色/浅色主题切换
 - 兼容原版 `ShortCutList.txt` 和 `ALTRun.ini` 文件格式
 - 新增导入/导出、开机自启、多参数占位符等功能
-<img width="920" height="760" alt="image" src="https://github.com/user-attachments/assets/ae0fdfac-42e1-4010-8ad5-93491863a745" />
 
 ---
 
