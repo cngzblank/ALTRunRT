@@ -1,6 +1,6 @@
 # ALTRun v2 (ALTRunRT)
 
-> 原版 ALTRun（Delphi 2007）的现代化重写版，基于 **Rust + Tauri + React + TypeScript** 构建。
+> 原版 ALTRun（Delphi 2007）的现代化重写版，基于 **Rust + Tauri + React + TypeScript** 构建，支持 Windows、macOS、Linux。
 
 ---
 
@@ -21,8 +21,24 @@
 - 使用 **Rust** 替代 Delphi，性能更好、内存更安全
 - 使用 **Tauri v2** 作为桌面框架，体积小、无 Electron 依赖
 - 使用 **React + TypeScript** 构建前端 UI，支持深色/浅色主题切换
-- 兼容原版 `ShortCutList.txt` 和 `ALTRun.ini` 文件格式
+- 兼容原版 `ShortCutList.txt` 和 `ALTRun.ini` 文件格式（Windows）
 - 新增导入/导出、开机自启、多参数占位符等功能
+- **跨平台支持**：Windows、macOS、Linux
+
+---
+
+## 平台支持
+
+| 功能 | Windows | macOS | Linux |
+|------|:-------:|:-----:|:-----:|
+| 全局热键 | ✅ | ✅ | ✅ |
+| 系统托盘 | ✅ | ✅ | ✅ |
+| 启动程序/URL | ✅ `ShellExecuteW` | ✅ `open` | ✅ `xdg-open` |
+| 打开目录 | ✅ `explorer.exe` | ✅ `open` | ✅ `xdg-open` |
+| 单实例保护 | ✅ 命名 Mutex | ✅ 文件锁 | ✅ 文件锁 |
+| 开机自启 | ✅ 注册表 `HKCU\...\Run` | ✅ `~/Library/LaunchAgents/` plist | ✅ `~/.config/autostart/` desktop |
+| 数据目录 | exe 同目录 | `~/Library/Application Support/ALTRun/` | `~/.config/ALTRun/` |
+| 环境变量 | `%VAR%` | `$VAR` / `~` | `$VAR` / `~` |
 
 ---
 
@@ -35,14 +51,14 @@
 | **全局热键唤出** | 按下热键（默认 `Ctrl+Space` 或 `Pause`）弹出/隐藏主窗口 |
 | **关键字实时搜索** | 输入关键字即时过滤快捷项列表，支持正则表达式和通配符（`*` `?`） |
 | **智能排序** | 根据使用频率 + 匹配位置加权排序，常用的排在前面 |
-| **命令执行** | 通过 Windows `ShellExecuteW` 静默启动程序，不弹出命令行窗口 |
+| **命令执行** | 静默启动程序，不弹出命令行窗口 |
 | **参数传递** | 输入 `关键字 参数` 格式，空格后的内容作为参数传入 |
 | **多参数支持** | 命令行中使用 `{%1}` `{%2}` ... `{%9}` 占位符，按位置填入参数 |
 | **数字键快捷执行** | `Alt+数字` 或 `Ctrl+数字` 直接执行列表中对应位置的快捷项 |
 | **系统托盘** | 左键单击切换显示/隐藏，右键弹出菜单（Show / Quit） |
 | **使用频率记忆** | 每次执行自动 +1 并持久化保存 |
-| **单实例保护** | 使用 Windows 命名 Mutex 防止重复启动，第二个实例直接退出 |
-| **开机自启动** | 通过注册表 `HKCU\...\Run` 实现，无需管理员权限 |
+| **单实例保护** | 防止重复启动，第二个实例直接退出 |
+| **开机自启动** | 无需管理员权限，各平台使用原生机制 |
 
 ### 参数占位符
 
@@ -66,7 +82,7 @@
 | `URL Query encoding` | 参数做 URL 编码（适合百度等搜索） |
 | `UTF-8 Query encoding` | 参数做 UTF-8 编码（适合 Google 等搜索） |
 
-### 显示控制前缀
+### 显示控制前缀（Windows）
 
 在命令行开头加前缀可控制窗口显示方式：
 
@@ -77,12 +93,6 @@
 | `@` | 隐藏窗口启动 |
 | （无前缀） | 正常显示 |
 
-### 快捷项管理
-
-- **Alt+S** 打开快捷项管理器，支持添加、编辑、删除
-- 输入不存在的关键字后按回车，自动弹出添加对话框
-- 支持拖拽调整窗口大小
-
 ### 配置系统
 
 **Alt+C** 打开配置面板，可调整：
@@ -91,30 +101,19 @@
 |------|--------|
 | **主题** | 深色 / 浅色主题切换（实时预览） |
 | **导入/导出** | 一键导出所有配置和快捷项为 JSON，跨设备迁移 |
-| **热键** | 主热键 / 副热键（支持 Ctrl、Alt、Shift、Win 组合） |
+| **热键** | 主热键 / 副热键（支持 Ctrl、Alt、Shift、Win/Cmd 组合） |
 | **行为** | 开机自启、正则搜索、任意位置匹配、数字键快捷执行等 |
 | **外观** | 窗口宽度、透明度、圆角半径、自动隐藏延迟 |
 
 ### 开机自启动
 
-在配置面板中勾选 **"Launch at Windows startup"** 并保存，ALTRun 会将自身路径写入注册表：
+在配置面板中勾选 **"Launch at Windows startup"** 并保存，各平台实现方式：
 
-```
-HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
-ALTRun = "C:\path\to\altrun.exe"
-```
+- **Windows**：写入注册表 `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`
+- **macOS**：写入 `~/Library/LaunchAgents/com.altrun.app.plist`
+- **Linux**：写入 `~/.config/autostart/altrun.desktop`
 
-- 无需管理员权限
-- 取消勾选并保存即可移除开机自启
-- 配置面板打开时会自动读取注册表的实际状态
-
-### 导入 / 导出
-
-配置面板中提供 **📤 Export All** 和 **📥 Import** 按钮：
-
-- **导出**：将所有配置 + 快捷项打包为一个 `.json` 文件
-- **导入**：从 `.json` 文件恢复配置，并合并快捷项（重复项自动跳过）
-- 适合在多台电脑之间同步配置
+均无需管理员权限，取消勾选并保存即可移除。
 
 ### 键盘快捷键
 
@@ -133,20 +132,25 @@ ALTRun = "C:\path\to\altrun.exe"
 
 ## 数据文件
 
-所有数据文件存放在 **exe 所在目录**，与原版 ALTRun 完全兼容：
+| 平台 | 数据目录 |
+|------|---------|
+| Windows | exe 所在目录（兼容原版 ALTRun） |
+| macOS | `~/Library/Application Support/ALTRun/` |
+| Linux | `~/.config/ALTRun/` |
+
+各平台数据文件相同：
 
 | 文件 | 说明 |
 |------|------|
 | `ALTRun.ini` | 配置文件（INI 格式） |
 | `ShortCutList.txt` | 快捷项列表（兼容原版格式） |
-| `altrun_debug.log` | 调试日志（记录热键注册、执行等事件） |
+| `altrun_debug.log` | 调试日志 |
 
 ### ShortCutList.txt 格式
 
 ```
 F<频率>    |<参数类型>          |<关键字>              |<名称>                        |<命令行>
 F100      |                    |Computer              |My Computer                   |::{20D04FE0-3AEA-1069-A2D8-08002B30309D}
-F50       |                    |Explorer              |Explorer                      |explorer.exe
 F50       |URL_Query           |b                     |Baidu Search                  |https://www.baidu.com/s?wd=
 F50       |UTF8_Query          |g                     |Google Search                 |https://www.google.com/search?q=
 ```
@@ -169,11 +173,11 @@ altrun/
 └── src-tauri/                  # Rust 后端
     └── src/
         ├── main.rs             # 程序入口
-        ├── lib.rs              # Tauri 命令注册、热键、托盘、窗口管理、注册表
+        ├── lib.rs              # Tauri 命令、热键、托盘、单实例、开机自启（跨平台）
         ├── models.rs           # 数据结构：ShortCutItem、AppConfig、ExportData
-        ├── storage.rs          # 文件读写：ShortCutList.txt、ALTRun.ini
+        ├── storage.rs          # 文件读写、数据目录（跨平台）
         ├── search.rs           # 搜索过滤与排序算法
-        └── executor.rs         # 命令执行引擎（ShellExecuteW、参数替换）
+        └── executor.rs         # 命令执行引擎（跨平台：ShellExecuteW / open / xdg-open）
 ```
 
 ### 前端技术栈
@@ -193,6 +197,8 @@ altrun/
 - **regex** — 正则表达式搜索
 - **urlencoding** — URL/UTF-8 参数编码
 - **serde / serde_json** — JSON 序列化（导入导出）
+- **libc** — Unix 文件锁（单实例保护，仅 macOS/Linux）
+- **dirs** — 跨平台目录路径
 
 ### 核心设计
 
@@ -202,17 +208,19 @@ altrun/
 rank = 1024 + freq × 4 - match_pos × 128 - len_diff × 16
 ```
 
-- `freq`：使用频率（越高排越前）
-- `match_pos`：匹配位置（越靠前排越前）
-- `len_diff`：关键字与快捷词的长度差（越接近排越前）
+**命令执行**（跨平台）：
+- Windows：`ShellExecuteW` — 不弹出命令行窗口，支持程序、URL、系统命令、Shell GUID
+- macOS：`open` — 使用系统默认程序打开文件/URL/App
+- Linux：`xdg-open` — 使用桌面环境默认程序
 
-**命令执行**：使用 Windows 原生 `ShellExecuteW` API，不经过 `cmd.exe`，不弹出命令行窗口，支持程序、URL、系统命令（`.cpl`、`.msc`）、Shell GUID 等所有 Windows 可执行对象。
+**单实例保护**（跨平台）：
+- Windows：命名 Mutex `ALTRun_SingleInstance_Mutex_v2`
+- macOS/Linux：`/tmp/altrun.lock` 文件排他锁（`flock`）
 
-**窗口管理**：使用原子布尔值 `WINDOW_VISIBLE` 追踪窗口可见状态，避免 Tauri `is_visible()` 在某些情况下不可靠的问题。
-
-**单实例保护**：使用 Windows 命名 Mutex `ALTRun_SingleInstance_Mutex_v2`，第二个实例启动时检测到 Mutex 已存在，直接 `exit(0)` 退出。
-
-**开机自启**：直接调用 Windows Registry API（`RegOpenKeyExW` / `RegSetValueExW` / `RegDeleteValueW`），写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，无需管理员权限，无第三方依赖。
+**开机自启**（跨平台，均无需管理员权限）：
+- Windows：注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+- macOS：`~/Library/LaunchAgents/com.altrun.app.plist`（launchd）
+- Linux：`~/.config/autostart/altrun.desktop`（XDG Autostart）
 
 ---
 
@@ -221,7 +229,8 @@ rank = 1024 + freq × 4 - match_pos × 128 - len_diff × 16
 | 特性 | 原版（Delphi） | 本版（Rust+Tauri） |
 |------|--------------|-----------------|
 | 运行时依赖 | VCL 运行库 | 无（静态编译） |
-| 文件格式兼容 | — | ✅ 完全兼容 |
+| 平台支持 | Windows only | Windows / macOS / Linux |
+| 文件格式兼容 | — | ✅ 完全兼容（Windows） |
 | 全局热键 | ✅ | ✅ |
 | 正则/通配符搜索 | ✅ | ✅ |
 | 参数传递 | ✅ | ✅ 增强（多参数占位符） |
@@ -243,14 +252,14 @@ rank = 1024 + freq × 4 - match_pos × 128 - len_diff × 16
 
 - Rust 1.87+（`rustup` 安装）
 - Node.js 18+
-- Windows 10/11
+- Windows 10/11、macOS 11+、或主流 Linux 发行版
 
 ### 构建步骤
 
 ```bash
 # 克隆仓库
 git clone https://github.com/cngzblank/ALTRunRT.git
-cd ALTRunRT/altrun
+cd ALTRunRT
 
 # 安装前端依赖
 npm install
@@ -259,28 +268,36 @@ npm install
 npx tauri build
 ```
 
-构建产物位于 `src-tauri/target/release/altrun.exe`，单文件，无需安装，直接运行即可。
+构建产物：
+- **Windows**：`src-tauri/target/release/altrun.exe`
+- **macOS**：`src-tauri/target/release/bundle/macos/ALTRun.app`
+- **Linux**：`src-tauri/target/release/bundle/appimage/altrun.AppImage`
 
 ---
 
 ## 默认快捷项
 
-首次运行时自动生成以下默认快捷项：
+首次运行时根据平台自动生成默认快捷项：
 
+### Windows
 | 关键字 | 名称 | 命令 |
 |--------|------|------|
 | `Computer` | My Computer | 打开"此电脑" |
-| `Explorer` | Explorer | 资源管理器 |
 | `notepad` | Notepad | 记事本 |
-| `cmd` | Command Prompt | 命令提示符（支持参数） |
+| `cmd` | Command Prompt | 命令提示符 |
 | `calc` | Calculator | 计算器 |
-| `taskmgr` | Task Manager | 任务管理器 |
-| `regedit` | Registry Editor | 注册表编辑器 |
-| `control` | Control Panel | 控制面板 |
-| `b` | Baidu Search | 百度搜索（URL 编码） |
-| `g` | Google Search | Google 搜索（UTF-8 编码） |
-| `shutdown` | Shutdown | 关机（5 秒后） |
-| `reboot` | Reboot | 重启（5 秒后） |
+| `g` | Google Search | Google 搜索 |
+| `b` | Baidu Search | 百度搜索 |
+
+### macOS
+| 关键字 | 名称 | 命令 |
+|--------|------|------|
+| `finder` | Finder | Finder 文件管理器 |
+| `terminal` | Terminal | 终端 |
+| `safari` | Safari | Safari 浏览器 |
+| `calculator` | Calculator | 计算器 |
+| `prefs` | System Preferences | 系统偏好设置 |
+| `g` | Google Search | Google 搜索 |
 
 ---
 
