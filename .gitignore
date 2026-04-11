@@ -1,0 +1,24 @@
+# Rust build artifacts
+src-tauri/target/
+
+# Node modules
+node_modules/
+
+# Frontend build output
+dist/
+
+# Tauri bundle output
+src-tauri/gen/
+
+# Debug logs & local data files
+src-tauri/target/release/altrun_debug.log
+src-tauri/target/release/ShortCutList.txt
+src-tauri/target/release/ALTRun.ini
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/

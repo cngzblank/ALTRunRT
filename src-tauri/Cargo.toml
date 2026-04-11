@@ -1,0 +1,25 @@
+[package]
+name = "altrun"
+version = "2.0.0"
+description = "ALTRun - Quick Launcher"
+authors = ["ALTRun"]
+edition = "2021"
+
+[lib]
+name = "altrun_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0.6", features = [] }
+
+[dependencies]
+tauri = { version = "2.5.0", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "2.2.0"
+tauri-plugin-shell = "2.2.0"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+urlencoding = "2"
+dirs = "5"
+once_cell = "1"
