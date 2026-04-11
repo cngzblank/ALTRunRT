@@ -39,142 +39,18 @@ fn log(msg: &str) {
     }
 }
 
-// ===== Auto-run registry helpers =====
-
-const AUTORUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-const AUTORUN_NAME: &str = "ALTRun";
-
-/// Read current exe path from registry autorun entry.
-/// Returns Some(path) if the entry exists, None otherwise.
-fn get_autorun() -> Option<String> {
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
-
-    fn to_wide(s: &str) -> Vec<u16> {
-        OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
-    }
-
-    extern "system" {
-        fn RegOpenKeyExW(
-            hkey: isize, lp_sub_key: *const u16, ul_options: u32,
-            sam_desired: u32, phk_result: *mut isize,
-        ) -> i32;
-        fn RegQueryValueExW(
-            hkey: isize, lp_value_name: *const u16, lp_reserved: *mut u32,
-            lp_type: *mut u32, lp_data: *mut u8, lpcb_data: *mut u32,
-        ) -> i32;
-        fn RegCloseKey(hkey: isize) -> i32;
-    }
-
-    const HKCU: isize = -2147483647; // 0x80000001
-    const KEY_READ: u32 = 0x20019;
-    const REG_SZ: u32 = 1;
-
-    let key_wide = to_wide(AUTORUN_KEY);
-    let name_wide = to_wide(AUTORUN_NAME);
-    let mut hkey: isize = 0;
-
-    unsafe {
-        if RegOpenKeyExW(HKCU, key_wide.as_ptr(), 0, KEY_READ, &mut hkey) != 0 {
-            return None;
-        }
-        let mut data_type: u32 = 0;
-        let mut data_len: u32 = 512;
-        let mut buf = vec![0u8; 512];
-        let ret = RegQueryValueExW(
-            hkey, name_wide.as_ptr(), std::ptr::null_mut(),
-            &mut data_type, buf.as_mut_ptr(), &mut data_len,
-        );
-        RegCloseKey(hkey);
-        if ret != 0 || data_type != REG_SZ { return None; }
-        // Convert UTF-16 LE bytes to String
-        let words: Vec<u16> = buf[..data_len as usize]
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .take_while(|&c| c != 0)
-            .collect();
-        Some(String::from_utf16_lossy(&words).to_string())
-    }
-}
-
-/// Set or remove the autorun registry entry.
-fn set_autorun(enable: bool) -> Result<(), String> {
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
-
-    fn to_wide(s: &str) -> Vec<u16> {
-        OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
-    }
-
-    extern "system" {
-        fn RegOpenKeyExW(
-            hkey: isize, lp_sub_key: *const u16, ul_options: u32,
-            sam_desired: u32, phk_result: *mut isize,
-        ) -> i32;
-        fn RegSetValueExW(
-            hkey: isize, lp_value_name: *const u16, reserved: u32,
-            dw_type: u32, lp_data: *const u8, cb_data: u32,
-        ) -> i32;
-        fn RegDeleteValueW(hkey: isize, lp_value_name: *const u16) -> i32;
-        fn RegCloseKey(hkey: isize) -> i32;
-    }
-
-    const HKCU: isize = -2147483647;
-    const KEY_SET_VALUE: u32 = 0x0002;
-    const REG_SZ: u32 = 1;
-
-    let key_wide = to_wide(AUTORUN_KEY);
-    let name_wide = to_wide(AUTORUN_NAME);
-    let mut hkey: isize = 0;
-
-    unsafe {
-        if RegOpenKeyExW(HKCU, key_wide.as_ptr(), 0, KEY_SET_VALUE, &mut hkey) != 0 {
-            return Err("Failed to open registry key".into());
-        }
-
-        let ret = if enable {
-            let exe = std::env::current_exe()
-                .map_err(|e| e.to_string())?
-                .to_string_lossy()
-                .to_string();
-            let value_wide = to_wide(&exe);
-            let bytes: Vec<u8> = value_wide.iter()
-                .flat_map(|w| w.to_le_bytes())
-                .collect();
-            RegSetValueExW(
-                hkey, name_wide.as_ptr(), 0, REG_SZ,
-                bytes.as_ptr(), bytes.len() as u32,
-            )
-        } else {
-            RegDeleteValueW(hkey, name_wide.as_ptr())
-        };
-
-        RegCloseKey(hkey);
-
-        if ret != 0 && enable {
-            Err(format!("Registry operation failed: {}", ret))
-        } else {
-            Ok(())
-        }
-    }
-}
-
-// ===== Single instance =====
+// ===== Single Instance =====
 
 #[cfg(target_os = "windows")]
-fn try_single_instance() -> Option<windows_single_instance::SingleInstanceGuard> {
-    windows_single_instance::SingleInstanceGuard::new("ALTRun_SingleInstance_Mutex_v2")
-}
-
-#[cfg(target_os = "windows")]
-mod windows_single_instance {
-    pub struct SingleInstanceGuard { handle: *mut std::ffi::c_void }
-    unsafe impl Send for SingleInstanceGuard {}
-    unsafe impl Sync for SingleInstanceGuard {}
-    impl SingleInstanceGuard {
-        pub fn new(name: &str) -> Option<Self> {
+mod single_instance {
+    pub struct Guard { handle: *mut std::ffi::c_void }
+    unsafe impl Send for Guard {}
+    unsafe impl Sync for Guard {}
+    impl Guard {
+        pub fn acquire() -> Option<Self> {
             use std::ffi::OsStr;
             use std::os::windows::ffi::OsStrExt;
+            let name = "ALTRun_SingleInstance_Mutex_v2";
             let wide: Vec<u16> = OsStr::new(name).encode_wide().chain(std::iter::once(0)).collect();
             extern "system" {
                 fn CreateMutexW(a: *mut std::ffi::c_void, b: i32, c: *const u16) -> *mut std::ffi::c_void;
@@ -187,16 +63,207 @@ mod windows_single_instance {
                 unsafe { CloseHandle(handle); }
                 return None;
             }
-            Some(SingleInstanceGuard { handle })
+            Some(Guard { handle })
         }
     }
-    impl Drop for SingleInstanceGuard {
+    impl Drop for Guard {
         fn drop(&mut self) {
             extern "system" { fn CloseHandle(h: *mut std::ffi::c_void) -> i32; }
             unsafe { CloseHandle(self.handle); }
         }
     }
 }
+
+#[cfg(not(target_os = "windows"))]
+mod single_instance {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    pub struct Guard { _file: std::fs::File }
+
+    impl Guard {
+        pub fn acquire() -> Option<Self> {
+            let lock_path = std::env::temp_dir().join("altrun.lock");
+            let file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&lock_path)
+                .ok()?;
+
+            // Try to get an exclusive lock (non-blocking)
+            #[cfg(unix)]
+            {
+                use std::os::unix::io::AsRawFd;
+                let fd = file.as_raw_fd();
+                let ret = unsafe {
+                    libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB)
+                };
+                if ret != 0 {
+                    return None; // Another instance holds the lock
+                }
+            }
+
+            Some(Guard { _file: file })
+        }
+    }
+}
+
+// ===== Auto-run =====
+
+#[cfg(target_os = "windows")]
+mod autorun {
+    const AUTORUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    const AUTORUN_NAME: &str = "ALTRun";
+
+    pub fn get() -> Option<String> {
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+        fn to_wide(s: &str) -> Vec<u16> {
+            OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+        }
+        extern "system" {
+            fn RegOpenKeyExW(hkey: isize, sub: *const u16, opts: u32, sam: u32, out: *mut isize) -> i32;
+            fn RegQueryValueExW(hkey: isize, name: *const u16, res: *mut u32, typ: *mut u32, data: *mut u8, len: *mut u32) -> i32;
+            fn RegCloseKey(hkey: isize) -> i32;
+        }
+        const HKCU: isize = -2147483647;
+        let mut hkey: isize = 0;
+        unsafe {
+            if RegOpenKeyExW(HKCU, to_wide(AUTORUN_KEY).as_ptr(), 0, 0x20019, &mut hkey) != 0 { return None; }
+            let mut typ: u32 = 0; let mut len: u32 = 512; let mut buf = vec![0u8; 512];
+            let ret = RegQueryValueExW(hkey, to_wide(AUTORUN_NAME).as_ptr(), std::ptr::null_mut(), &mut typ, buf.as_mut_ptr(), &mut len);
+            RegCloseKey(hkey);
+            if ret != 0 || typ != 1 { return None; }
+            let words: Vec<u16> = buf[..len as usize].chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|&c| c != 0).collect();
+            Some(String::from_utf16_lossy(&words).to_string())
+        }
+    }
+
+    pub fn set(enable: bool) -> Result<(), String> {
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+        fn to_wide(s: &str) -> Vec<u16> {
+            OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+        }
+        extern "system" {
+            fn RegOpenKeyExW(hkey: isize, sub: *const u16, opts: u32, sam: u32, out: *mut isize) -> i32;
+            fn RegSetValueExW(hkey: isize, name: *const u16, res: u32, typ: u32, data: *const u8, len: u32) -> i32;
+            fn RegDeleteValueW(hkey: isize, name: *const u16) -> i32;
+            fn RegCloseKey(hkey: isize) -> i32;
+        }
+        const HKCU: isize = -2147483647;
+        let mut hkey: isize = 0;
+        unsafe {
+            if RegOpenKeyExW(HKCU, to_wide(AUTORUN_KEY).as_ptr(), 0, 0x0002, &mut hkey) != 0 {
+                return Err("Failed to open registry key".into());
+            }
+            let ret = if enable {
+                let exe = std::env::current_exe().map_err(|e| e.to_string())?.to_string_lossy().to_string();
+                let wide = to_wide(&exe);
+                let bytes: Vec<u8> = wide.iter().flat_map(|w| w.to_le_bytes()).collect();
+                RegSetValueExW(hkey, to_wide(AUTORUN_NAME).as_ptr(), 0, 1, bytes.as_ptr(), bytes.len() as u32)
+            } else {
+                RegDeleteValueW(hkey, to_wide(AUTORUN_NAME).as_ptr())
+            };
+            RegCloseKey(hkey);
+            if ret != 0 && enable { Err(format!("Registry op failed: {}", ret)) } else { Ok(()) }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod autorun {
+    use std::path::PathBuf;
+
+    fn plist_path() -> PathBuf {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("~"))
+            .join("Library/LaunchAgents/com.altrun.app.plist")
+    }
+
+    pub fn get() -> Option<String> {
+        if plist_path().exists() { Some("enabled".into()) } else { None }
+    }
+
+    pub fn set(enable: bool) -> Result<(), String> {
+        let path = plist_path();
+        if enable {
+            let exe = std::env::current_exe()
+                .map_err(|e| e.to_string())?
+                .to_string_lossy()
+                .to_string();
+            let plist = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.altrun.app</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+</dict>
+</plist>"#, exe);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            std::fs::write(&path, plist).map_err(|e| e.to_string())
+        } else {
+            if path.exists() {
+                std::fs::remove_file(&path).map_err(|e| e.to_string())
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+mod autorun {
+    // Linux: use ~/.config/autostart
+    use std::path::PathBuf;
+
+    fn desktop_path() -> PathBuf {
+        dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("~/.config"))
+            .join("autostart/altrun.desktop")
+    }
+
+    pub fn get() -> Option<String> {
+        if desktop_path().exists() { Some("enabled".into()) } else { None }
+    }
+
+    pub fn set(enable: bool) -> Result<(), String> {
+        let path = desktop_path();
+        if enable {
+            let exe = std::env::current_exe()
+                .map_err(|e| e.to_string())?
+                .to_string_lossy()
+                .to_string();
+            let desktop = format!(
+                "[Desktop Entry]\nType=Application\nName=ALTRun\nExec={}\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\n",
+                exe
+            );
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            std::fs::write(&path, desktop).map_err(|e| e.to_string())
+        } else {
+            if path.exists() {
+                std::fs::remove_file(&path).map_err(|e| e.to_string())
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
+// ===== Hotkey normalization =====
 
 fn normalize_hotkey(s: &str) -> String {
     let s = s.trim();
@@ -208,7 +275,7 @@ fn normalize_hotkey(s: &str) -> String {
             "ctrl" | "control" => "Ctrl".into(),
             "alt" => "Alt".into(),
             "shift" => "Shift".into(),
-            "win" | "super" | "meta" | "windows" => "Super".into(),
+            "win" | "super" | "meta" | "windows" | "cmd" | "command" => "Super".into(),
             "space" => "Space".into(),
             "enter" | "return" => "Enter".into(),
             "escape" | "esc" => "Escape".into(),
@@ -321,16 +388,14 @@ fn delete_item(id: usize, state: tauri::State<'_, State>) -> Result<(), String> 
 #[tauri::command]
 fn get_config(state: tauri::State<'_, State>) -> AppConfig {
     let mut cfg = state.lock().unwrap().config.clone();
-    // Sync auto_run from actual registry state
-    cfg.auto_run = get_autorun().is_some();
+    cfg.auto_run = autorun::get().is_some();
     cfg
 }
 
 #[tauri::command]
 fn save_config(config: AppConfig, state: tauri::State<'_, State>) -> Result<(), String> {
     let mut st = state.lock().unwrap();
-    // Apply auto-run registry change
-    if let Err(e) = set_autorun(config.auto_run) {
+    if let Err(e) = autorun::set(config.auto_run) {
         log(&format!("set_autorun({}) failed: {}", config.auto_run, e));
     } else {
         log(&format!("set_autorun({}) OK", config.auto_run));
@@ -360,25 +425,22 @@ fn import_data(path: String, state: tauri::State<'_, State>) -> Result<String, S
         let exists = st.items.iter().any(|i| i.shortcut == imp_item.shortcut && i.command_line == imp_item.command_line);
         if !exists {
             let id = st.next_id; st.next_id += 1;
-            let mut new_item = imp_item.clone();
-            new_item.id = id;
-            st.items.push(new_item);
-            added += 1;
+            let mut new_item = imp_item.clone(); new_item.id = id;
+            st.items.push(new_item); added += 1;
         }
     }
     st.save_items();
     let msg = format!("Imported: config updated, {} new shortcuts added ({} skipped as duplicates)", added, data.items.len() - added);
-    log(&msg);
-    Ok(msg)
+    log(&msg); Ok(msg)
 }
 
 // ===== App Setup =====
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    #[cfg(target_os = "windows")]
-    let _single_instance_guard = match try_single_instance() {
-        Some(guard) => guard,
+    // Single instance check
+    let _guard = match single_instance::Guard::acquire() {
+        Some(g) => g,
         None => std::process::exit(0),
     };
 
@@ -403,8 +465,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             filter_keyword, execute_item, hide_window, open_item_dir,
             get_all_items, add_item, update_item, delete_item,
-            get_config, save_config,
-            export_data, import_data,
+            get_config, save_config, export_data, import_data,
         ])
         .setup(move |app| {
             let show_i = MenuItem::with_id(app, "show", "Show ALTRun", true, None::<&str>)?;
@@ -430,6 +491,7 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // Register hotkeys
             let mut shortcuts: Vec<Shortcut> = Vec::new();
             let norm1 = normalize_hotkey(&hk1);
             if !norm1.is_empty() {

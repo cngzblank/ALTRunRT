@@ -23,3 +23,7 @@ regex = "1"
 urlencoding = "2"
 dirs = "5"
 once_cell = "1"
+
+# Unix-only: file locking for single-instance
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
