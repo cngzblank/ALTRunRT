@@ -66,11 +66,11 @@ export default function ConfigPanel({ onClose }: Props) {
       });
       if (!selected) return;
       const msg: string = await invoke("import_data", { path: selected });
-      setStatus("✅ " + msg);
+      setStatus("✅ " + msg + " 请重启 ALTRun，以确保导入的配置全部生效。");
       const newConfig = await invoke<AppConfig>("get_config");
       setConfig(newConfig);
       applyTheme(newConfig.theme);
-      setTimeout(() => setStatus(""), 5000);
+      setTimeout(() => setStatus(""), 8000);
     } catch (e) {
       setStatus("❌ Import failed: " + e);
     }

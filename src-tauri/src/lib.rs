@@ -77,7 +77,6 @@ mod single_instance {
 #[cfg(not(target_os = "windows"))]
 mod single_instance {
     use std::fs::OpenOptions;
-    use std::io::Write;
 
     pub struct Guard { _file: std::fs::File }
 
@@ -291,6 +290,73 @@ fn normalize_hotkey(s: &str) -> String {
     }).collect::<Vec<_>>().join("+")
 }
 
+fn parse_hotkeys(config: &AppConfig) -> Result<Vec<Shortcut>, String> {
+    let mut shortcuts = Vec::new();
+
+    let norm1 = normalize_hotkey(&config.hotkey1);
+    if !norm1.is_empty() {
+        let shortcut = norm1.parse::<Shortcut>()
+            .map_err(|e| format!("Primary hotkey '{}' is invalid: {:?}", norm1, e))?;
+        log(&format!("parsed hk1: {}", norm1));
+        shortcuts.push(shortcut);
+    }
+
+    let norm2 = normalize_hotkey(&config.hotkey2);
+    if !norm2.is_empty() {
+        if norm2 == norm1 {
+            log(&format!("skip duplicated hk2: {}", norm2));
+        } else {
+            let shortcut = norm2.parse::<Shortcut>()
+                .map_err(|e| format!("Secondary hotkey '{}' is invalid: {:?}", norm2, e))?;
+            log(&format!("parsed hk2: {}", norm2));
+            shortcuts.push(shortcut);
+        }
+    }
+
+    Ok(shortcuts)
+}
+
+fn bind_hotkeys(app: &tauri::AppHandle, shortcuts: Vec<Shortcut>) -> Result<(), String> {
+    app.global_shortcut()
+        .unregister_all()
+        .map_err(|e| format!("Failed to clear existing hotkeys: {:?}", e))?;
+
+    if shortcuts.is_empty() {
+        log("all hotkeys cleared");
+        return Ok(());
+    }
+
+    let app_handle = app.clone();
+    app.global_shortcut()
+        .on_shortcuts(shortcuts, move |_app, shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                log(&format!("HOTKEY: {:?}", shortcut));
+                toggle_main_window(&app_handle);
+            }
+        })
+        .map_err(|e| format!("Failed to register hotkeys: {:?}", e))?;
+
+    log("hotkeys registered OK");
+    Ok(())
+}
+
+fn apply_hotkeys(app: &tauri::AppHandle, config: &AppConfig) -> Result<(), String> {
+    let shortcuts = parse_hotkeys(config)?;
+    bind_hotkeys(app, shortcuts)
+}
+
+fn rebind_hotkeys(app: &tauri::AppHandle, old_config: &AppConfig, new_config: &AppConfig) -> Result<(), String> {
+    let new_shortcuts = parse_hotkeys(new_config)?;
+    if let Err(err) = bind_hotkeys(app, new_shortcuts) {
+        match parse_hotkeys(old_config).and_then(|shortcuts| bind_hotkeys(app, shortcuts)) {
+            Ok(_) => log("hotkeys restored after failed rebind"),
+            Err(restore_err) => log(&format!("restore hotkeys failed: {}", restore_err)),
+        }
+        return Err(err);
+    }
+    Ok(())
+}
+
 impl AppState {
     fn save_items(&self) {
         storage::save_shortcut_list(&storage::shortcut_list_path(), &self.items);
@@ -393,13 +459,18 @@ fn get_config(state: tauri::State<'_, State>) -> AppConfig {
 }
 
 #[tauri::command]
-fn save_config(config: AppConfig, state: tauri::State<'_, State>) -> Result<(), String> {
+fn save_config(config: AppConfig, state: tauri::State<'_, State>, app: tauri::AppHandle) -> Result<(), String> {
     let mut st = state.lock().unwrap();
+    let prev_config = st.config.clone();
+
+    rebind_hotkeys(&app, &prev_config, &config)?;
+
     if let Err(e) = autorun::set(config.auto_run) {
         log(&format!("set_autorun({}) failed: {}", config.auto_run, e));
     } else {
         log(&format!("set_autorun({}) OK", config.auto_run));
     }
+
     st.config = config.clone();
     storage::save_config(&storage::config_path(), &config);
     Ok(())
@@ -414,10 +485,14 @@ fn export_data(path: String, state: tauri::State<'_, State>) -> Result<(), Strin
 }
 
 #[tauri::command]
-fn import_data(path: String, state: tauri::State<'_, State>) -> Result<String, String> {
+fn import_data(path: String, state: tauri::State<'_, State>, app: tauri::AppHandle) -> Result<String, String> {
     let content = std::fs::read_to_string(&path).map_err(|e| format!("Failed to read {}: {}", path, e))?;
     let data: ExportData = serde_json::from_str(&content).map_err(|e| format!("Invalid file: {}", e))?;
     let mut st = state.lock().unwrap();
+    let prev_config = st.config.clone();
+
+    rebind_hotkeys(&app, &prev_config, &data.config)?;
+
     st.config = data.config.clone();
     storage::save_config(&storage::config_path(), &st.config);
     let mut added = 0usize;
@@ -454,8 +529,7 @@ pub fn run() {
     let next_id = items.iter().map(|i| i.id).max().unwrap_or(0) + 1;
     log(&format!("{} items loaded", items.len()));
 
-    let hk1 = config.hotkey1.clone();
-    let hk2 = config.hotkey2.clone();
+    let startup_config = config.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -491,34 +565,8 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Register hotkeys
-            let mut shortcuts: Vec<Shortcut> = Vec::new();
-            let norm1 = normalize_hotkey(&hk1);
-            if !norm1.is_empty() {
-                match norm1.parse::<Shortcut>() {
-                    Ok(sc) => { log(&format!("parsed hk1: {}", norm1)); shortcuts.push(sc); }
-                    Err(e) => log(&format!("parse hk1 '{}' FAILED: {:?}", norm1, e)),
-                }
-            }
-            let norm2 = normalize_hotkey(&hk2);
-            if !norm2.is_empty() && norm2 != norm1 {
-                match norm2.parse::<Shortcut>() {
-                    Ok(sc) => { log(&format!("parsed hk2: {}", norm2)); shortcuts.push(sc); }
-                    Err(e) => log(&format!("parse hk2 '{}' FAILED: {:?}", norm2, e)),
-                }
-            }
-
-            if !shortcuts.is_empty() {
-                let app_handle = app.handle().clone();
-                match app.global_shortcut().on_shortcuts(shortcuts, move |_app, shortcut, event| {
-                    if event.state == ShortcutState::Pressed {
-                        log(&format!("HOTKEY: {:?}", shortcut));
-                        toggle_main_window(&app_handle);
-                    }
-                }) {
-                    Ok(_) => log("hotkeys registered OK"),
-                    Err(e) => log(&format!("hotkeys FAILED: {:?}", e)),
-                }
+            if let Err(e) = apply_hotkeys(app.handle(), &startup_config) {
+                log(&format!("hotkeys FAILED: {}", e));
             }
 
             log("setup done");
